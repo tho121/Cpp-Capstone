@@ -49,7 +49,8 @@
                 "-lopencv_photo",
                 "-lopencv_stitching",
                 "-lopencv_video",
-                "-lopencv_videoio"
+                "-lopencv_videoio",
+                "-lopencv_ximgproc"
             ],
             "options": {
                 "cwd": "${fileDirname}"
