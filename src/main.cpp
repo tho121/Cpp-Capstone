@@ -91,7 +91,7 @@ vector<Mat> showSelectiveSearch(const Mat& im)
     imshow(name, im_with_keypoints );
 } */
 
-Mat transformImage(Mat& image, Size targetSize)
+Mat transformImage(const Mat& image, Size targetSize)
 {
     Mat imGrey, imBlur, imCanny, imErode, imDil, imResized;
 
@@ -116,8 +116,7 @@ void getProcessedImages(std::string path, vector<Mat>& outVector)
      // Check for failure
     if (image.empty()) 
     {
-        cout << "Could not open or find the image" << endl;
-        cin.get(); //wait for any key press
+        cout << "Could not open or find the image for " << path << endl;
         return;
     }
 
@@ -179,7 +178,7 @@ void getProcessedImages(std::string path, vector<Mat>& outVector)
 int main() {
     std::cout << "Hello World!" << "\n";
 
-    const int sampleSize = 2000;
+    const int sampleSize = 1000;
 
     char path[128];
     for(int i = 0; i < sampleSize; ++i)
@@ -188,15 +187,23 @@ int main() {
         getProcessedImages(string(path), processedImages);
     }
 
-    labels.insert(labels.end(), sampleSize, 1);
+    labels.insert(labels.end(), processedImages.size(), 1);
 
-    for(int i = 0; i < sampleSize; ++i)
+    int failCount = 0;
+    for(int i = 0; i < sampleSize + failCount; ++i)
     {
         sprintf(path, "../PetImages/Dog/%d.jpg", i);
         //getProcessedImages(string(buf), processedImages);
         Mat imDog = imread(path);
-        transformImage(imDog, targetSize);
-        processedImages.emplace_back(imDog);
+
+        if (imDog.empty()) 
+        {
+            cout << "Could not open or find the image for " << path << endl;
+            failCount++;
+            continue;
+        }
+
+        processedImages.emplace_back( transformImage(imDog, targetSize) );
     }
 
     labels.insert(labels.end(), sampleSize, 0);
@@ -207,13 +214,64 @@ int main() {
     shuffle (processedImages.begin(), processedImages.end(), std::default_random_engine(seed));
     shuffle (labels.begin(), labels.end(), std::default_random_engine(seed));
 
-    
+    Mat training_mat(processedImages.size(), targetSize.area(), CV_32FC1);
 
+    for(int count = 0; count < processedImages.size(); ++count)
+    {
+        int ii = 0; // Current column in training_mat
+        for (int i = 0; i<processedImages[count].rows; i++) {
+            for (int j = 0; j < processedImages[count].cols; j++) {
+                training_mat.at<float>(count,ii++) = processedImages[count].at<uchar>(i,j);
+            }
+        }
+    }
+    
     Ptr<ml::SVM> svm = ml::SVM::create();
     svm->setType(ml::SVM::C_SVC);
     svm->setKernel(ml::SVM::LINEAR);
     svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, 100, 1e-6));
-    svm->train(processedImages, ml::ROW_SAMPLE, labels);
+    svm->train(training_mat, ml::ROW_SAMPLE, labels);
+
+    vector<float> totalCatScores;
+    vector<float> totalDogScores;
+
+    for(int i = sampleSize; i < sampleSize + 10; ++i)
+    {
+        sprintf(path, "../PetImages/Cat/%d.jpg", i);
+        Mat imCatTest = imread(path);
+
+        sprintf(path, "../PetImages/Dog/%d.jpg", i);
+        Mat imDogTest = imread(path);
+
+        transformImage(imCatTest, targetSize);
+        transformImage(imDogTest, targetSize);
+
+        Mat test_mat(2, targetSize.area(), CV_32FC1);
+
+        int ii = 0; // Current column in training_mat
+        for (int i = 0; i<targetSize.width; i++) {
+            for (int j = 0; j < targetSize.height; j++) {
+                test_mat.at<float>(0,ii) = imCatTest.at<uchar>(i,j);
+                test_mat.at<float>(1,ii) = imDogTest.at<uchar>(i,j);
+                ii++;
+            }
+        }
+        
+
+        Mat scores;
+        svm->predict(test_mat, scores, ml::StatModel::RAW_OUTPUT);
+
+        cout << scores.at<float>(0,0) << " " << scores.at<float>(1,0) << endl;
+
+        totalCatScores.emplace_back(scores.at<float>(0,0));
+        totalDogScores.emplace_back(scores.at<float>(1,0));
+    }
+
+    float catAverage = accumulate( totalCatScores.begin(), totalCatScores.end(), 0.0)/totalCatScores.size();              
+    cout << "The catAverage is" << catAverage << endl;
+
+    float dogAverage = accumulate( totalDogScores.begin(), totalDogScores.end(), 0.0)/totalDogScores.size();              
+    cout << "The dogAverage is" << dogAverage << endl;   
 
     /* showImages("../PetImages/Cat/0.jpg");
     showImages("../PetImages/Cat/1.jpg");
