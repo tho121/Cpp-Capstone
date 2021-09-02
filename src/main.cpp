@@ -9,89 +9,9 @@ using namespace std;
 using namespace cv;
 using namespace cv::ximgproc::segmentation;
 
-vector<Mat> processedImages;
-vector<int> labels;
 const Size targetSize(250, 250);
 
-vector<Mat> showSelectiveSearch(const Mat& im)
-{
-    Ptr<SelectiveSearchSegmentation> ss = createSelectiveSearchSegmentation();
-
-    ss->setBaseImage(im);
-    ss->switchToSelectiveSearchFast();
-
-    // run selective search segmentation on input image
-    std::vector<Rect> rects;
-    ss->process(rects);
-/*     std::cout << "Total Number of Region Proposals: " << rects.size() << std::endl;
- */
-    auto size = im.size();
-
-    Mat imOut = im.clone();
-
-    vector<float> scores;
-    Point imMid(size.width/2, size.height/2);
-    Point imSize(size.width, size.height);
-
-    //filter rects 
-    for(int i = rects.size() - 1; i >= 0; --i)
-    {
-        Rect& r = rects[i];
-
-        if((float)r.width / size.width  < 0.5 || (float)r.height / size.height < 0.5)
-        {
-            rects.erase(rects.begin() + i);
-            continue;
-        }
-        else
-        {
-            //rectangle(imOut, r, Scalar(0, 255, 0));
-
-            Point boxMid(r.x + r.width/2, r.y + r.height/2);
-
-            //circle(imOut, boxMid, 2, Scalar(0, 0, 255));
-
-            Point score(imMid - boxMid);
-            float x = (float)score.x / size.width;
-            float y = (float)score.y / size.height;
-
-            //squared norm as the score
-            //heavily discriminates against boxes far from the center
-            scores.emplace_back(1.0f - (x*x + y*y));
-        }
-    }
-
-    reverse(scores.begin(), scores.end());
-
-    vector<int> nmsIndices;
-    dnn::NMSBoxes(rects, scores, 0.95f, 0.4f, nmsIndices);
-    vector<Mat> croppedImages;
-
-    for(int i = 0; i < nmsIndices.size(); ++i)
-    {
-        rectangle(imOut, rects[nmsIndices[i]], Scalar(0, 255, 0));
-        croppedImages.emplace_back(imOut(rects[nmsIndices[i]]));
-    }
-
-    // show output
-    //imshow("Output", imOut);
-
-    return croppedImages;
-}
-
-/* void showBlob(const Mat& image, string name)
-{
-	std::vector<KeyPoint> keypoints;
-    Ptr<SimpleBlobDetector> detector = cv::SimpleBlobDetector::create();
-	detector->detect( image, keypoints);
-
-    Mat im_with_keypoints;
-    drawKeypoints( image, keypoints, im_with_keypoints, Scalar(0,0,255), DrawMatchesFlags::DRAW_RICH_KEYPOINTS );
-
-    imshow(name, im_with_keypoints );
-} */
-
-Mat transformImage(const Mat& image, Size targetSize)
+Mat transformImage(const Mat& image)//, Size targetSize)
 {
     Mat imGrey, imBlur, imCanny, imErode, imDil, imResized;
 
@@ -109,155 +29,185 @@ Mat transformImage(const Mat& image, Size targetSize)
     return imResized;
 }
 
-void getProcessedImages(std::string path, vector<Mat>& outVector)
+void flatten(const Mat& image, Mat& outMat, int index)
 {
-    Mat image = imread(path);
-
-     // Check for failure
-    if (image.empty()) 
-    {
-        cout << "Could not open or find the image for " << path << endl;
-        return;
+    int ii = 0;
+    for (int i = 0; i<image.rows; i++) {
+        for (int j = 0; j < image.cols; j++) {
+            outMat.at<float>(index, ii++) = image.at<uchar>(i,j);
+        }
     }
-
-
-    /* Mat adap_mean_2, adap_mean_2_blurred;
-
-    adaptiveThreshold(imGrey, adap_mean_2, 255, 
-                                        ADAPTIVE_THRESH_MEAN_C, 
-                                        THRESH_BINARY, 7, 2);
-
-    adaptiveThreshold(imGrey, adap_mean_2_blurred, 255, 
-                                        ADAPTIVE_THRESH_MEAN_C, 
-                                        THRESH_BINARY, 7, 2);
-
-    imshow("adap_mean_2", adap_mean_2);
-    imshow("adap_mean_2_blurred", adap_mean_2_blurred); */
-
-    /* Mat thresh;
-    threshold(imErode, thresh, 127, 255, THRESH_BINARY_INV | THRESH_OTSU);
-    imshow("thresh", thresh);
-
-    RNG rng(12345);
-    vector<vector<Point> > contours;
-    vector<Vec4i> hierarchy;
-    findContours( imErode, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE );
-    Mat drawing = Mat::zeros( imErode.size(), CV_8UC3 );
-
-    sort(contours.begin(), contours.end(), [](vector<Point> contour1, vector<Point> contour2 )
-    {
-        double i = fabs( contourArea(cv::Mat(contour1)) );
-        double j = fabs( contourArea(cv::Mat(contour2)) );
-        return ( i > j );
-    });
-
-    for( size_t i = 0; i < contours.size() && i < 10; i++ )
-    {
-        Scalar color = Scalar( rng.uniform(0, 256), rng.uniform(0,256), rng.uniform(0,256) );
-        drawContours( drawing, contours, (int)i, color, 2, LINE_8, hierarchy, 0 );
-    }
-    imshow( "Contours", drawing ); */
-
-    vector<Mat> selectedImages = showSelectiveSearch(image);
-    
-
-    for(int i = 0; i < selectedImages.size(); ++i)
-    {
-        selectedImages[i] = transformImage(selectedImages[i], targetSize);
-
-        /* char buf[16];
-        sprintf(buf, "IM: %d", i);
-        imshow(string(buf), selectedImages[i]); */
-    }
-
-    outVector.insert(outVector.begin(), selectedImages.begin(), selectedImages.end());
-
-    //waitKey(0); // Wait for any keystroke in the window
 }
 
-int main() {
-    std::cout << "Hello World!" << "\n";
+vector<Rect> getRects(const Mat& im, vector<float>& centerScores)
+{
+    vector<Rect> outRects;
 
-    const int sampleSize = 1000;
+    Ptr<SelectiveSearchSegmentation> ss = createSelectiveSearchSegmentation();
 
+    ss->setBaseImage(im);
+    ss->switchToSelectiveSearchFast();
+
+    // run selective search segmentation on input image
+    ss->process(outRects);
+
+    auto size = im.size();
+    Point imMid(size.width/2, size.height/2);
+
+    //filter rects 
+    for(int i = outRects.size() - 1; i >= 0; --i)
+    {
+        Rect& r = outRects[i];
+
+        //filter out small boxes
+        if((float)r.width / size.width  < 0.5 || (float)r.height / size.height < 0.5)
+        {
+            outRects.erase(outRects.begin() + i);
+            continue;
+        }
+        else    //get a score approximation while we're here
+        {
+            Point boxMid(r.x + r.width/2, r.y + r.height/2);
+            Point score(imMid - boxMid);
+            float x = (float)score.x / size.width;
+            float y = (float)score.y / size.height;
+
+            //squared norm as the score
+            //heavily discriminates against boxes far from the center
+            centerScores.emplace_back(1.0f - (x*x + y*y));
+        }
+    }
+
+    reverse(centerScores.begin(), centerScores.end());
+
+    return outRects;
+}
+
+Mat getTransformedRects(const Mat& im, const vector<Rect>& rects)
+{
+    vector<Mat> croppedImages;
+    vector<float> scores;
+
+    auto size = im.size();
+    Point imSize(size.width, size.height);
+    Mat flatten_mat(rects.size(), targetSize.area(), CV_32FC1);
+
+    for(int i = 0; i < rects.size(); ++i)
+    {
+        const Rect& r = rects[i];
+
+        Mat croppedImage = im(r);
+        croppedImage = transformImage(croppedImage);//, targetSize);
+        flatten(croppedImage, flatten_mat, i);
+    }
+
+    return flatten_mat;
+}
+
+vector<float> getSVMScores(const Mat& sampleMat, Ptr<ml::SVM> svm)
+{
+    Mat score;
+    svm->predict(sampleMat, score, ml::StatModel::RAW_OUTPUT);
+
+    int rows = sampleMat.size().height;
+    vector<float> scores;
+    scores.reserve(rows);
+
+    for(int i = 0; i < rows; ++i)
+    {
+        scores.emplace_back(score.at<float>(i, 0));
+    }
+
+    return scores;
+}
+
+vector<int> getNMSSelection(const vector<Rect>& rects, const vector<float>& scores, float confidenceThresh, float nmsThresh)
+{
+    vector<int> nmsIndices;
+    dnn::NMSBoxes(rects, scores, confidenceThresh, nmsThresh, nmsIndices);
+    
+    return nmsIndices;
+}
+
+vector<int> getNMSSelection(const vector<Rect>& rects, const Mat& scores, float confidenceThresh, float nmsThresh)
+{
+    vector<int> nmsIndices;
+    dnn::NMSBoxes(rects, scores, confidenceThresh, nmsThresh, nmsIndices);
+    
+    return nmsIndices;
+}
+
+void initialDataExtraction(string pathFormat, int sampleSize, vector<Rect>& outRects, Mat& outMat)
+{
     char path[128];
     for(int i = 0; i < sampleSize; ++i)
     {
-        sprintf(path, "../PetImages/Cat/%d.jpg", i);
-        getProcessedImages(string(path), processedImages);
-    }
+        sprintf(path, pathFormat.c_str(), i);
 
-    labels.insert(labels.end(), processedImages.size(), 1);
+        Mat image = imread(path);
 
-    int failCount = 0;
-    for(int i = 0; i < sampleSize + failCount; ++i)
-    {
-        sprintf(path, "../PetImages/Dog/%d.jpg", i);
-        //getProcessedImages(string(buf), processedImages);
-        Mat imDog = imread(path);
-
-        if (imDog.empty()) 
+        // Check for failure
+        if (image.empty()) 
         {
-            cout << "Could not open or find the image for " << path << endl;
-            failCount++;
-            continue;
+            std::cout << "Could not open or find the image for " << path << std::endl;
+            continue;;
         }
 
-        processedImages.emplace_back( transformImage(imDog, targetSize) );
-    }
+        vector<float> scores;
+        vector<Rect> rects = getRects(image, scores);
+        vector<int> indices = getNMSSelection(rects, scores, 0.95f, 0.4f);
+        vector<Rect> candidateRects;
+        candidateRects.reserve(indices.size());
 
-    labels.insert(labels.end(), sampleSize, 0);
-
-    //same seed will shuffle the images with their labels together
-    unsigned int seed = 0;
-
-    shuffle (processedImages.begin(), processedImages.end(), std::default_random_engine(seed));
-    shuffle (labels.begin(), labels.end(), std::default_random_engine(seed));
-
-    Mat training_mat(processedImages.size(), targetSize.area(), CV_32FC1);
-
-    for(int count = 0; count < processedImages.size(); ++count)
-    {
-        int ii = 0; // Current column in training_mat
-        for (int i = 0; i<processedImages[count].rows; i++) {
-            for (int j = 0; j < processedImages[count].cols; j++) {
-                training_mat.at<float>(count,ii++) = processedImages[count].at<uchar>(i,j);
-            }
+        for(int i = 0; i < indices.size(); ++i)
+        {
+            int j = indices[i];
+            candidateRects.emplace_back(rects[j]);
         }
-    }
-    
-    Ptr<ml::SVM> svm = ml::SVM::create();
-    svm->setType(ml::SVM::C_SVC);
-    svm->setKernel(ml::SVM::LINEAR);
-    svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, 100, 1e-6));
-    svm->train(training_mat, ml::ROW_SAMPLE, labels);
 
+        Mat transformedRects = getTransformedRects(image, candidateRects);
+        vconcat(outMat, transformedRects, outMat);
+
+        outRects.insert(outRects.end(), candidateRects.begin(), candidateRects.end());
+    }
+}
+
+void testSVM(Ptr<ml::SVM> svm, int offset, int testCount)
+{
     vector<float> totalCatScores;
     vector<float> totalDogScores;
 
-    for(int i = sampleSize; i < sampleSize + 10; ++i)
+    char path[128];
+    for(int i = offset; i < offset + testCount; ++i)
     {
         sprintf(path, "../PetImages/Cat/%d.jpg", i);
         Mat imCatTest = imread(path);
 
+        // Check for failure
+        if (imCatTest.empty()) 
+        {
+            std::cout << "Could not open or find the image for " << path << std::endl;
+            continue;;
+        }
+
         sprintf(path, "../PetImages/Dog/%d.jpg", i);
         Mat imDogTest = imread(path);
 
-        transformImage(imCatTest, targetSize);
-        transformImage(imDogTest, targetSize);
+        // Check for failure
+        if (imDogTest.empty()) 
+        {
+            std::cout << "Could not open or find the image for " << path << std::endl;
+            continue;;
+        }
+
+        imCatTest = transformImage(imCatTest);//, targetSize);
+        imDogTest = transformImage(imDogTest);//, targetSize);
 
         Mat test_mat(2, targetSize.area(), CV_32FC1);
 
-        int ii = 0; // Current column in training_mat
-        for (int i = 0; i<targetSize.width; i++) {
-            for (int j = 0; j < targetSize.height; j++) {
-                test_mat.at<float>(0,ii) = imCatTest.at<uchar>(i,j);
-                test_mat.at<float>(1,ii) = imDogTest.at<uchar>(i,j);
-                ii++;
-            }
-        }
+        flatten(imCatTest, test_mat, 0);
+        flatten(imDogTest, test_mat, 1);
         
-
         Mat scores;
         svm->predict(test_mat, scores, ml::StatModel::RAW_OUTPUT);
 
@@ -267,21 +217,102 @@ int main() {
         totalDogScores.emplace_back(scores.at<float>(1,0));
     }
 
-    float catAverage = accumulate( totalCatScores.begin(), totalCatScores.end(), 0.0)/totalCatScores.size();              
-    cout << "The catAverage is" << catAverage << endl;
+    float catAverage = accumulate( totalCatScores.begin(), totalCatScores.end(), 0.0)/totalCatScores.size();
+    float dogAverage = accumulate( totalDogScores.begin(), totalDogScores.end(), 0.0)/totalDogScores.size();         
+    cout << "The catAverage is " << catAverage << " The dogAverage is " << dogAverage << endl;  
+}
 
-    float dogAverage = accumulate( totalDogScores.begin(), totalDogScores.end(), 0.0)/totalDogScores.size();              
-    cout << "The dogAverage is" << dogAverage << endl;   
+int main()
+{
+    std::cout << "Hello World!" << "\n";
 
-    /* showImages("../PetImages/Cat/0.jpg");
-    showImages("../PetImages/Cat/1.jpg");
-    showImages("../PetImages/Cat/2.jpg");
-    showImages("../PetImages/Cat/3.jpg");
-    showImages("../PetImages/Cat/4.jpg");
-    showImages("../PetImages/Cat/5.jpg");
-    showImages("../PetImages/Cat/6.jpg");
-    showImages("../PetImages/Cat/7.jpg");
-    showImages("../PetImages/Cat/8.jpg"); */
+    const int sampleSize = 5;
+    const float confidenceStep = 0.05f;
+    const int maxIterations = 5;
+    const int testSize = 5;
+
+    vector<Rect> catRects;
+    Mat catTransformedRects(0, targetSize.area(), CV_32FC1);
+
+    initialDataExtraction("../PetImages/Cat/%d.jpg", sampleSize, catRects, catTransformedRects);
+
+    vector<Rect> dogRects;
+    Mat dogTransformedRects(0, targetSize.area(), CV_32FC1);
+
+    initialDataExtraction("../PetImages/Dog/%d.jpg", sampleSize, dogRects, dogTransformedRects);
+
+    //temp mid scores calculated, images flattened, nms selection done
+
+    vector<int> catIndices(catRects.size());
+    vector<int> dogIndices(dogRects.size());
+
+    //assign initial value to be same as index, with dog indices offset by size of cat array
+    for(int i = 0; i < catRects.size(); ++i){ catIndices[i] = i;}
+    for(int i = 0; i < dogRects.size(); ++i){ dogIndices[i] = i + catRects.size();}
+
+    for(int count = 0; count < maxIterations; ++count)
+    {
+        int totalCount = catIndices.size() + dogIndices.size();
+
+        vector<int> order;
+        order.reserve(totalCount);
+        order.insert(order.end(), catIndices.begin(), catIndices.end());
+        order.insert(order.end(), dogIndices.begin(), dogIndices.end());
+
+        unsigned int seed = 0;
+        std::shuffle (order.begin(), order.end(), std::default_random_engine(seed));
+
+        vector<int> labels;
+        labels.reserve(totalCount);
+
+        Mat training_mat(totalCount, targetSize.area(), CV_32FC1);
+
+        for(int i = 0; i < totalCount; ++i)
+        {
+            int j = order[i];
+
+            if(j >= catRects.size())
+            {
+                //remove offset for dog
+                j -= catRects.size();
+                dogTransformedRects.row(j).copyTo(training_mat.row(i));
+                labels.emplace_back(-1);
+            }
+            else
+            {
+                catTransformedRects.row(j).copyTo(training_mat.row(i));
+                labels.emplace_back(1);
+            }
+        }
+
+        Ptr<ml::SVM> svm = ml::SVM::create();
+        svm->setType(ml::SVM::C_SVC);
+        svm->setKernel(ml::SVM::LINEAR);
+        svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, 100, 1e-6));
+        svm->train(training_mat, ml::ROW_SAMPLE, labels);
+
+        testSVM(svm, sampleSize, testSize);
+
+        //early out
+        if(count == maxIterations - 1)
+        {
+            break;
+        }
+
+        Mat catScore;
+        svm->predict(catTransformedRects, catScore, ml::StatModel::RAW_OUTPUT);
+
+        Mat dogScore;
+        svm->predict(dogTransformedRects, dogScore, ml::StatModel::RAW_OUTPUT);
+
+        svm->clear();
+
+        catIndices.clear();
+        catIndices = getNMSSelection(catRects, catScore, 0.5f + (count * confidenceStep), 0.4f);
+
+        dogIndices.clear();
+        dogIndices = getNMSSelection(dogRects, dogScore, 0.5f + (count * confidenceStep), 0.4f);
+    }
 
     waitKey(0);
 
