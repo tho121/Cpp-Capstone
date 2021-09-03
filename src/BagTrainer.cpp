@@ -23,42 +23,25 @@ BagTrainer::BagTrainer(int dictionarySize, int threads)
 
 void BagTrainer::computeDescriptors(const vector<Mat>& images)
 {
-    /* vector<KeyPoint> keypoints;
-    Mat descriptor;
-    Ptr<SiftDescriptorExtractor> detector = SiftDescriptorExtractor::create();
-    Mat featuresUnclustered; */
-
     Mat featuresUnclustered;
 
-    //if(threadCount_ > 1)
+    int splitSize = images.size() / threadCount_;
+    int count = 0;
+
+    vector<future<Mat>> futures;
+    for(int i = 0; i < threadCount_; ++i)
     {
-        
-        int splitSize = images.size() / threadCount_;
-        int count = 0;
-
-        vector<future<Mat>> futures;
-        for(int i = 0; i < threadCount_; ++i)
-        {
-            futures.push_back(async(launch::async, &BagTrainer::computeDescriptorsAsync, this, images, count, count + splitSize));
-            count += splitSize;
-        }
-
-        for(int i = 0; i < futures.size(); ++i)
-        {
-            Mat features = futures[i].get();
-
-            featuresUnclustered.push_back(features);
-        }
+        futures.push_back(async(launch::async, &BagTrainer::computeDescriptorsAsync, this, images, count, count + splitSize));
+        count += splitSize;
     }
 
-    /* for(int i = 0; i < images.size(); ++i)
+    for(int i = 0; i < futures.size(); ++i)
     {
-        detector->detect(images[i], keypoints);
-        detector->compute(images[i], keypoints, descriptor);
+        Mat features = futures[i].get();
 
-        featuresUnclustered.push_back(descriptor);
-    } */
-
+        featuresUnclustered.push_back(features);
+    }
+    
     featuresUnclustered_.push_back(featuresUnclustered);
 }
 
@@ -100,11 +83,58 @@ void BagTrainer::setVocab(int maxIterations)
     bowDE_->setVocabulary(dict);
 }
 
-Mat BagTrainer::getDescriptors(const vector<Mat>& images)
+/* Mat BagTrainer::getDescriptors(const vector<Mat>& images)
 {
     Mat outMat;
     for(int i = 0; i < images.size(); ++i)
     {
+        vector<KeyPoint> keypoints;
+        detector_->detect(images[i], keypoints);
+
+        Mat descriptors;
+        bowDE_->compute(images[i], keypoints, descriptors);
+
+        if (!descriptors.empty())
+        {
+            outMat.push_back(descriptors);
+        }
+    }
+
+    return std::move(outMat);
+} */
+
+Mat BagTrainer::getDescriptors(const vector<Mat>& images)
+{
+    Mat outMat;
+
+    int splitSize = images.size() / threadCount_;
+    int count = 0;
+
+    vector<future<Mat>> futures;
+    for(int i = 0; i < threadCount_; ++i)
+    {
+        futures.push_back(async(launch::async, &BagTrainer::getDescriptorsAsync, this, images, count, count + splitSize));
+        count += splitSize;
+    }
+
+    for(int i = 0; i < futures.size(); ++i)
+    {
+        Mat features = futures[i].get();
+
+        outMat.push_back(features);
+    }
+    
+    return std::move(outMat);
+}
+
+Mat BagTrainer::getDescriptorsAsync(const vector<Mat>& images, int startPos, int endPos)
+{
+    Mat outMat;
+    for(int i = startPos; i < endPos && i < images.size(); ++i)
+    {
+        if(i % 100 == 0)
+            cout << "Computing descriptor " << i << endl;
+
         vector<KeyPoint> keypoints;
         detector_->detect(images[i], keypoints);
 

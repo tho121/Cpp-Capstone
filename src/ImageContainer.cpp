@@ -3,15 +3,17 @@
 #include <future>
 #include <mutex>
 
-ImageContainer::ImageContainer(const vector<string>& loadPaths, int sampleSize, int offset)
+ImageContainer::ImageContainer(const vector<string>& loadPaths, int sampleSize, Size imSize, int offset)
 {
-    loadImages(loadPaths, sampleSize, offset);
+    categorySize_ = sampleSize;
+    imSize_ = imSize;
+    loadImages(loadPaths, offset);
 }
 
 vector<Mat> ImageContainer::getImages()
 {
     std::lock_guard<std::mutex> lck(mutex_);
-    
+
     vector<Mat> allImages;
     allImages.reserve(categorySize_ * images_.size());
 
@@ -23,16 +25,14 @@ vector<Mat> ImageContainer::getImages()
     return std::move(allImages);
 }
 
-void ImageContainer::loadImages(const vector<string>& paths, int sampleSize, int offset)
+void ImageContainer::loadImages(const vector<string>& paths, int offset)
 {
-    categorySize_ = sampleSize;
-
     vector<future<vector<Mat>>> futures;
 
     char path[128];
     for(int i = 0; i < paths.size(); ++i)
     {
-        futures.push_back(async(launch::async, &ImageContainer::loadImagesAsync, this, paths[i], sampleSize, offset));
+        futures.push_back(async(launch::async, &ImageContainer::loadImagesAsync, this, paths[i], offset));
     }
 
     for(int i = 0; i < futures.size(); ++i)
@@ -44,30 +44,35 @@ void ImageContainer::loadImages(const vector<string>& paths, int sampleSize, int
     }
 }
 
-vector<Mat> ImageContainer::loadImagesAsync(const string& path, int sampleSize, int offset)
+vector<Mat> ImageContainer::loadImagesAsync(const string& path, int offset)
 {
     vector<Mat> imageCategory;
-    imageCategory.reserve(sampleSize);
+    imageCategory.reserve(categorySize_);
+
+    bool doResize = imSize_.area() > 0;
 
     char pathBuf[128];
     int failureOffset = 0;
-    for(int i = offset; i < offset + sampleSize + failureOffset; ++i)
+    for(int i = offset; i < offset + categorySize_ + failureOffset; ++i)
     {
-        if(i % 100 == 0)
-            cout << "Loading Sample " << i << " from " << path << endl;
-
         sprintf(pathBuf, path.c_str(), i);
+
+        if(i % 100 == 0)
+            cout << "Loading Sample " << i << " from " << pathBuf << endl;
 
         Mat image = imread(pathBuf, IMREAD_GRAYSCALE);
 
         // Check for failure
         if (image.empty()) 
         {
-            cout << "Could not open or find the image for " << path << endl;
+            cout << "Could not open or find the image for " << pathBuf << endl;
             failureOffset++;
             continue;
         }
 
+        if(doResize)
+            resize(image, image, imSize_);
+            
         imageCategory.emplace_back(image);
     }
 

@@ -1,9 +1,11 @@
 #include "SVMTrainer.h"
 #include "ImageContainer.h"
 #include "BagTrainer.h"
+#include "ScopeTimer.h"
 
 #include <iostream>
 #include <string>
+#include <chrono>
 
 using namespace std;
 
@@ -11,38 +13,52 @@ int main()
 {
     std::cout << "Hello World!" << "\n";
 
-    const int sampleSize = 2000;
+    const int sampleSize = 5000;
+    const Size imageSize(300, 300);
     const int dictionarySize = 100;
     const int threadCount = 4;
     const int maxBagIterations = 1000;
-    const int maxSVMIterations = 1000;
-    const int testSize = 100;
+    const int maxSVMIterations = 10000;
+    const int testSize = 500;
 
     vector<string> paths = {"../PetImages/Cat/%d.jpg", "../PetImages/Dog/%d.jpg"};
 
-    ImageContainer train_ic(paths, sampleSize);
+    ImageContainer train_ic(paths, sampleSize, imageSize);
 
     BagTrainer bt(dictionarySize, threadCount);
-    bt.computeDescriptors(train_ic.getImages());
-    bt.setVocab(maxBagIterations);
-
-    vector<Mat> catImages = train_ic.getImages(0);
-    Mat catData = bt.getDescriptors(catImages);
-
-    vector<Mat> dogImages = train_ic.getImages(1);
-    Mat dogData = bt.getDescriptors(dogImages);
+    {
+        ScopeTimer t("Computed descriptors: ");
+        bt.computeDescriptors(train_ic.getImages());
+    }
+    
+    {
+        ScopeTimer t("Computed vocab: ");
+        bt.setVocab(maxBagIterations);
+    }
 
     Mat labels;
-    for(int i = 0; i < catData.rows; ++i) {labels.push_back(1);}
-    for(int i = 0; i < dogData.rows; ++i) {labels.push_back(-1);}
-
     Mat trainData;
-    vconcat(catData, dogData, trainData);
+    {
+        ScopeTimer t("Prepared training data: ");
+        vector<Mat> catImages = train_ic.getImages(0);
+        Mat catData = bt.getDescriptors(catImages);
 
+        vector<Mat> dogImages = train_ic.getImages(1);
+        Mat dogData = bt.getDescriptors(dogImages);
+
+        for(int i = 0; i < catData.rows; ++i) {labels.push_back(1);}
+        for(int i = 0; i < dogData.rows; ++i) {labels.push_back(-1);}
+
+        vconcat(catData, dogData, trainData);
+    }
+    
     SVMTrainer st(maxSVMIterations);
-    st.train(trainData, labels);
-
-    ImageContainer test_ic(paths, testSize, sampleSize);
+    {
+        ScopeTimer t("Training SVM Done: ");
+        st.train(trainData, labels);
+    }
+    
+    ImageContainer test_ic(paths, testSize, imageSize, sampleSize);
 
     Mat cat_testData = bt.getDescriptors(test_ic.getImages(0));
     Mat dog_testData = bt.getDescriptors(test_ic.getImages(1));
