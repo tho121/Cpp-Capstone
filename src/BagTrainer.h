@@ -8,17 +8,21 @@ class BagTrainer
 {
 public:
 
-    BagTrainer();
+    BagTrainer(int dictionarySize, int threads = 1);
 
     void computeDescriptors(const vector<Mat>& images);
     void setVocab(int maxIterations);
     Mat getDescriptors(const vector<Mat>& images);
+    Mat computeDescriptorsAsync(const vector<Mat>& images, int startPos, int endPos);
 
 private:
 
     vector<Mat> featuresUnclustered_;
     int dictionarySize_;
+    int threadCount_;
     unique_ptr<BOWImgDescriptorExtractor> bowDE_;
     Ptr<FeatureDetector> detector_;
+
+    
 
 };

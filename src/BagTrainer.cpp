@@ -1,31 +1,86 @@
 #include "BagTrainer.h"
 
-BagTrainer::BagTrainer()
+#include <thread>
+#include <future>
+#include <mutex>
+
+BagTrainer::BagTrainer(int dictionarySize, int threads)
 :   detector_(SiftFeatureDetector::create())
 {
     Ptr<DescriptorMatcher> matcher = FlannBasedMatcher::create();
     Ptr<DescriptorExtractor> extractor = SiftDescriptorExtractor::create();
     bowDE_ = make_unique<BOWImgDescriptorExtractor>(extractor, matcher);
 
-    dictionarySize_ = 2000;
+    dictionarySize_ = dictionarySize;
+
+    if(threads < 1)
+    {
+        threads = 1;
+    }
+
+    threadCount_ = threads;
 }
 
 void BagTrainer::computeDescriptors(const vector<Mat>& images)
+{
+    /* vector<KeyPoint> keypoints;
+    Mat descriptor;
+    Ptr<SiftDescriptorExtractor> detector = SiftDescriptorExtractor::create();
+    Mat featuresUnclustered; */
+
+    Mat featuresUnclustered;
+
+    //if(threadCount_ > 1)
+    {
+        
+        int splitSize = images.size() / threadCount_;
+        int count = 0;
+
+        vector<future<Mat>> futures;
+        for(int i = 0; i < threadCount_; ++i)
+        {
+            futures.push_back(async(launch::async, &BagTrainer::computeDescriptorsAsync, this, images, count, count + splitSize));
+            count += splitSize;
+        }
+
+        for(int i = 0; i < futures.size(); ++i)
+        {
+            Mat features = futures[i].get();
+
+            featuresUnclustered.push_back(features);
+        }
+    }
+
+    /* for(int i = 0; i < images.size(); ++i)
+    {
+        detector->detect(images[i], keypoints);
+        detector->compute(images[i], keypoints, descriptor);
+
+        featuresUnclustered.push_back(descriptor);
+    } */
+
+    featuresUnclustered_.push_back(featuresUnclustered);
+}
+
+Mat BagTrainer::computeDescriptorsAsync(const vector<Mat>& images, int startPos, int endPos)
 {
     vector<KeyPoint> keypoints;
     Mat descriptor;
     Ptr<SiftDescriptorExtractor> detector = SiftDescriptorExtractor::create();
     Mat featuresUnclustered;
 
-    for(int i = 0; i < images.size(); ++i)
+    for(int i = startPos; i < endPos && i < images.size(); ++i)
     {
+        if(i % 100 == 0)
+            cout << "Computing Sample " << i << endl;
+
         detector->detect(images[i], keypoints);
         detector->compute(images[i], keypoints, descriptor);
 
         featuresUnclustered.push_back(descriptor);
     }
 
-    featuresUnclustered_.push_back(featuresUnclustered);
+    return featuresUnclustered;
 }
 
 void BagTrainer::setVocab(int maxIterations)

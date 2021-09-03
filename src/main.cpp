@@ -12,6 +12,8 @@ int main()
     std::cout << "Hello World!" << "\n";
 
     const int sampleSize = 2000;
+    const int dictionarySize = 100;
+    const int threadCount = 4;
     const int maxBagIterations = 1000;
     const int maxSVMIterations = 1000;
     const int testSize = 100;
@@ -20,7 +22,7 @@ int main()
 
     ImageContainer train_ic(paths, sampleSize);
 
-    BagTrainer bt;
+    BagTrainer bt(dictionarySize, threadCount);
     bt.computeDescriptors(train_ic.getImages());
     bt.setVocab(maxBagIterations);
 
