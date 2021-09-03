@@ -10,7 +10,7 @@ BagTrainer::BagTrainer()
     dictionarySize_ = 2000;
 }
 
-void BagTrainer::calcFeatures(const vector<Mat>& images)
+void BagTrainer::computeDescriptors(const vector<Mat>& images)
 {
     vector<KeyPoint> keypoints;
     Mat descriptor;

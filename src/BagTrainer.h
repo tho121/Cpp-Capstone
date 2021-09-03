@@ -10,7 +10,7 @@ public:
 
     BagTrainer();
 
-    void calcFeatures(const vector<Mat>& images);
+    void computeDescriptors(const vector<Mat>& images);
     void setVocab(int maxIterations);
     Mat getDescriptors(const vector<Mat>& images);
 

@@ -1,5 +1,6 @@
 #include <vector>
 #include <string>
+#include <mutex>
 #include <opencv2/opencv.hpp>
 
 using namespace std;
@@ -18,8 +19,11 @@ public:
 private:
 
     void loadImages(const vector<string>& paths, int sampleSize, int offset = 0);
+    vector<Mat> loadImagesAsync(const string& path, int sampleSize, int offset = 0);
 
     vector<vector<Mat>> images_;
     int categorySize_;
+
+    std::mutex mutex_;
 
 };

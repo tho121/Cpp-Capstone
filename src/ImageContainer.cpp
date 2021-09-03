@@ -1,4 +1,7 @@
 #include "ImageContainer.h"
+#include <thread>
+#include <future>
+#include <mutex>
 
 ImageContainer::ImageContainer(const vector<string>& loadPaths, int sampleSize, int offset)
 {
@@ -7,6 +10,8 @@ ImageContainer::ImageContainer(const vector<string>& loadPaths, int sampleSize, 
 
 vector<Mat> ImageContainer::getImages()
 {
+    std::lock_guard<std::mutex> lck(mutex_);
+    
     vector<Mat> allImages;
     allImages.reserve(categorySize_ * images_.size());
 
@@ -20,37 +25,51 @@ vector<Mat> ImageContainer::getImages()
 
 void ImageContainer::loadImages(const vector<string>& paths, int sampleSize, int offset)
 {
-    images_.clear();
-
     categorySize_ = sampleSize;
 
+    vector<future<vector<Mat>>> futures;
+
     char path[128];
-    for(int p = 0; p < paths.size(); ++p)
+    for(int i = 0; i < paths.size(); ++i)
     {
-        vector<Mat> imageCategory;
-        imageCategory.reserve(sampleSize);
+        futures.push_back(async(launch::async, &ImageContainer::loadImagesAsync, this, paths[i], sampleSize, offset));
+    }
 
-        int failureOffset = 0;
-        for(int i = offset; i < offset + sampleSize + failureOffset; ++i)
+    for(int i = 0; i < futures.size(); ++i)
+    {
+        vector<Mat> images = futures[i].get();
+
+        std::lock_guard<std::mutex> lck(mutex_);
+        images_.emplace_back(images);
+    }
+}
+
+vector<Mat> ImageContainer::loadImagesAsync(const string& path, int sampleSize, int offset)
+{
+    vector<Mat> imageCategory;
+    imageCategory.reserve(sampleSize);
+
+    char pathBuf[128];
+    int failureOffset = 0;
+    for(int i = offset; i < offset + sampleSize + failureOffset; ++i)
+    {
+        if(i % 100 == 0)
+            cout << "Loading Sample " << i << " from " << path << endl;
+
+        sprintf(pathBuf, path.c_str(), i);
+
+        Mat image = imread(pathBuf, IMREAD_GRAYSCALE);
+
+        // Check for failure
+        if (image.empty()) 
         {
-            if(i % 100 == 0)
-                cout << "Loading Sample " << i << " of category " << p << std::endl;
-
-            sprintf(path, paths[p].c_str(), i);
-
-            Mat image = imread(path, IMREAD_GRAYSCALE);
-
-            // Check for failure
-            if (image.empty()) 
-            {
-                std::cout << "Could not open or find the image for " << path << std::endl;
-                failureOffset++;
-                continue;
-            }
-
-            imageCategory.emplace_back(image);
+            cout << "Could not open or find the image for " << path << endl;
+            failureOffset++;
+            continue;
         }
 
-        images_.emplace_back(imageCategory);
+        imageCategory.emplace_back(image);
     }
+
+    return std::move(imageCategory);
 }

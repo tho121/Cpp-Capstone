@@ -21,7 +21,7 @@ int main()
     ImageContainer train_ic(paths, sampleSize);
 
     BagTrainer bt;
-    bt.calcFeatures(train_ic.getImages());
+    bt.computeDescriptors(train_ic.getImages());
     bt.setVocab(maxBagIterations);
 
     vector<Mat> catImages = train_ic.getImages(0);
