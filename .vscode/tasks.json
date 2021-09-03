@@ -50,7 +50,7 @@
                 "-lopencv_stitching",
                 "-lopencv_video",
                 "-lopencv_videoio",
-                "-lopencv_ximgproc"
+                "-lopencv_ximgproc",
             ],
             "options": {
                 "cwd": "${fileDirname}"

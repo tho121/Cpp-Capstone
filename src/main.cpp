@@ -1,178 +1,100 @@
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <opencv2/ximgproc.hpp>
-#include <opencv2/dnn.hpp>
 #include <opencv2/ml.hpp>
+#include <opencv2/features2d.hpp>
 #include <random>
 
 using namespace std;
 using namespace cv;
-using namespace cv::ximgproc::segmentation;
 
-const Size targetSize(250, 250);
-
-Mat transformImage(const Mat& image)//, Size targetSize)
+vector<Mat> getImages(const vector<string>& paths, const int sampleSize)
 {
-    Mat imGrey, imBlur, imCanny, imErode, imDil, imResized;
-
-    cv::cvtColor(image, imGrey, cv::COLOR_BGR2GRAY);
-
-    GaussianBlur(imGrey, imBlur, Size(5,5), 3);
-    Canny(imBlur, imCanny, 50, 75);
-
-    Mat kernel = getStructuringElement(MORPH_RECT, Size(3,3));
-    dilate(imCanny, imDil, kernel);
-    erode(imDil, imErode, kernel);
-
-    resize(imErode, imResized, targetSize);
-
-    return imResized;
-}
-
-void flatten(const Mat& image, Mat& outMat, int index)
-{
-    int ii = 0;
-    for (int i = 0; i<image.rows; i++) {
-        for (int j = 0; j < image.cols; j++) {
-            outMat.at<float>(index, ii++) = image.at<uchar>(i,j);
-        }
-    }
-}
-
-vector<Rect> getRects(const Mat& im, vector<float>& centerScores)
-{
-    vector<Rect> outRects;
-
-    Ptr<SelectiveSearchSegmentation> ss = createSelectiveSearchSegmentation();
-
-    ss->setBaseImage(im);
-    ss->switchToSelectiveSearchFast();
-
-    // run selective search segmentation on input image
-    ss->process(outRects);
-
-    auto size = im.size();
-    Point imMid(size.width/2, size.height/2);
-
-    //filter rects 
-    for(int i = outRects.size() - 1; i >= 0; --i)
-    {
-        Rect& r = outRects[i];
-
-        //filter out small boxes
-        if((float)r.width / size.width  < 0.5 || (float)r.height / size.height < 0.5)
-        {
-            outRects.erase(outRects.begin() + i);
-            continue;
-        }
-        else    //get a score approximation while we're here
-        {
-            Point boxMid(r.x + r.width/2, r.y + r.height/2);
-            Point score(imMid - boxMid);
-            float x = (float)score.x / size.width;
-            float y = (float)score.y / size.height;
-
-            //squared norm as the score
-            //heavily discriminates against boxes far from the center
-            centerScores.emplace_back(1.0f - (x*x + y*y));
-        }
-    }
-
-    reverse(centerScores.begin(), centerScores.end());
-
-    return outRects;
-}
-
-Mat getTransformedRects(const Mat& im, const vector<Rect>& rects)
-{
-    vector<Mat> croppedImages;
-    vector<float> scores;
-
-    auto size = im.size();
-    Point imSize(size.width, size.height);
-    Mat flatten_mat(rects.size(), targetSize.area(), CV_32FC1);
-
-    for(int i = 0; i < rects.size(); ++i)
-    {
-        const Rect& r = rects[i];
-
-        Mat croppedImage = im(r);
-        croppedImage = transformImage(croppedImage);//, targetSize);
-        flatten(croppedImage, flatten_mat, i);
-    }
-
-    return flatten_mat;
-}
-
-vector<float> getSVMScores(const Mat& sampleMat, Ptr<ml::SVM> svm)
-{
-    Mat score;
-    svm->predict(sampleMat, score, ml::StatModel::RAW_OUTPUT);
-
-    int rows = sampleMat.size().height;
-    vector<float> scores;
-    scores.reserve(rows);
-
-    for(int i = 0; i < rows; ++i)
-    {
-        scores.emplace_back(score.at<float>(i, 0));
-    }
-
-    return scores;
-}
-
-vector<int> getNMSSelection(const vector<Rect>& rects, const vector<float>& scores, float confidenceThresh, float nmsThresh)
-{
-    vector<int> nmsIndices;
-    dnn::NMSBoxes(rects, scores, confidenceThresh, nmsThresh, nmsIndices);
-    
-    return nmsIndices;
-}
-
-vector<int> getNMSSelection(const vector<Rect>& rects, const Mat& scores, float confidenceThresh, float nmsThresh)
-{
-    vector<int> nmsIndices;
-    dnn::NMSBoxes(rects, scores, confidenceThresh, nmsThresh, nmsIndices);
-    
-    return nmsIndices;
-}
-
-void initialDataExtraction(string pathFormat, int sampleSize, vector<Rect>& outRects, Mat& outMat)
-{
+    vector<Mat> images;
     char path[128];
-    for(int i = 0; i < sampleSize; ++i)
+    for(int p = 0; p < paths.size(); ++p)
     {
-        sprintf(path, pathFormat.c_str(), i);
-
-        Mat image = imread(path);
-
-        // Check for failure
-        if (image.empty()) 
+        int failureOffset = 0;
+        for(int i = 0; i < sampleSize + failureOffset; ++i)
         {
-            std::cout << "Could not open or find the image for " << path << std::endl;
-            continue;;
+            if(i % 100 == 0)
+                cout << "Sample " << i << std::endl;
+
+            sprintf(path, paths[p].c_str(), i);
+
+            Mat image = imread(path, IMREAD_GRAYSCALE);
+
+            // Check for failure
+            if (image.empty()) 
+            {
+                std::cout << "Could not open or find the image for " << path << std::endl;
+                failureOffset++;
+                continue;
+            }
+
+            images.emplace_back(image);
         }
-
-        vector<float> scores;
-        vector<Rect> rects = getRects(image, scores);
-        vector<int> indices = getNMSSelection(rects, scores, 0.95f, 0.4f);
-        vector<Rect> candidateRects;
-        candidateRects.reserve(indices.size());
-
-        for(int i = 0; i < indices.size(); ++i)
-        {
-            int j = indices[i];
-            candidateRects.emplace_back(rects[j]);
-        }
-
-        Mat transformedRects = getTransformedRects(image, candidateRects);
-        vconcat(outMat, transformedRects, outMat);
-
-        outRects.insert(outRects.end(), candidateRects.begin(), candidateRects.end());
     }
+    
+    return images;
 }
 
-void testSVM(Ptr<ml::SVM> svm, int offset, int testCount)
+Mat initialDataExtraction(vector<Mat> images, Mat& labels, int groupSize, BOWImgDescriptorExtractor& bowDE, Ptr<FeatureDetector> train_detector)
+{
+    //To store the keypoints that will be extracted by SIFT
+    vector<KeyPoint> keypoints;
+    //To store the SIFT descriptor of current image
+    Mat descriptor;
+    //To store all the descriptors that are extracted from all the images.
+    Mat featuresUnclustered;
+    //The SIFT feature extractor and descriptor
+    Ptr<SiftDescriptorExtractor> detector = SiftDescriptorExtractor::create();
+
+    for(int i = 0; i < images.size(); ++i)
+    {
+        //detect feature points
+        detector->detect(images[i], keypoints);
+        //compute the descriptors for each keypoint
+        detector->compute(images[i], keypoints, descriptor);
+
+        featuresUnclustered.push_back(descriptor);
+    }
+
+    int dictionarySize=2000;
+    //define Term Criteria
+    TermCriteria tc(TermCriteria::MAX_ITER,1000,0.001);
+    //retries number
+    int retries=1;
+    //necessary flags
+    int flags=KMEANS_PP_CENTERS;
+    //Create the BoW (or BoF) trainer
+    BOWKMeansTrainer bowTrainer(dictionarySize,tc,retries,flags);
+    //cluster the feature vectors
+    Mat dictionary=bowTrainer.cluster(featuresUnclustered);
+
+    bowDE.setVocabulary(dictionary);
+
+    //Mat train, response;
+
+    Mat outMat;
+    for(int i = 0; i < images.size(); ++i)
+    {
+        vector<KeyPoint> keypoints;
+        train_detector->detect(images[i], keypoints);
+        Mat descriptors;
+        bowDE.compute(images[i], keypoints, descriptors);
+
+        if (!descriptors.empty())
+        {
+            outMat.push_back(descriptors);     // update training data
+            labels.push_back( i < groupSize ? 1 : -1);        // update response data
+        }
+    }
+
+    return outMat;
+}
+
+void testSVM(Ptr<ml::SVM> svm, int offset, int testCount, BOWImgDescriptorExtractor& bowDE, Ptr<FeatureDetector> detector )
 {
     vector<float> totalCatScores;
     vector<float> totalDogScores;
@@ -180,36 +102,61 @@ void testSVM(Ptr<ml::SVM> svm, int offset, int testCount)
     char path[128];
     for(int i = offset; i < offset + testCount; ++i)
     {
+        Mat test;
+
         sprintf(path, "../PetImages/Cat/%d.jpg", i);
-        Mat imCatTest = imread(path);
+        Mat imCatTest = imread(path, IMREAD_GRAYSCALE);
 
         // Check for failure
         if (imCatTest.empty()) 
         {
-            std::cout << "Could not open or find the image for " << path << std::endl;
+            cout << "Could not open or find the image for " << path << std::endl;
             continue;;
         }
 
+        {
+            vector<KeyPoint> keypoints;
+            detector->detect(imCatTest, keypoints);
+            Mat descriptors;
+            bowDE.compute(imCatTest, keypoints, descriptors);
+            if (!descriptors.empty())
+            {
+                test.push_back(descriptors);     // update training data
+            }
+            else
+            {
+                continue;
+            }
+        }
+        
+
         sprintf(path, "../PetImages/Dog/%d.jpg", i);
-        Mat imDogTest = imread(path);
+        Mat imDogTest = imread(path, IMREAD_GRAYSCALE);
 
         // Check for failure
         if (imDogTest.empty()) 
         {
-            std::cout << "Could not open or find the image for " << path << std::endl;
+            cout << "Could not open or find the image for " << path << std::endl;
             continue;;
         }
 
-        imCatTest = transformImage(imCatTest);//, targetSize);
-        imDogTest = transformImage(imDogTest);//, targetSize);
-
-        Mat test_mat(2, targetSize.area(), CV_32FC1);
-
-        flatten(imCatTest, test_mat, 0);
-        flatten(imDogTest, test_mat, 1);
+        {
+            vector<KeyPoint> keypoints;
+            detector->detect(imDogTest, keypoints);
+            Mat descriptors;
+            bowDE.compute(imDogTest, keypoints, descriptors);
+            if (!descriptors.empty())
+            {
+                test.push_back(descriptors);     // update training data
+            }
+            else
+            {
+                continue;
+            }
+        }
         
         Mat scores;
-        svm->predict(test_mat, scores, ml::StatModel::RAW_OUTPUT);
+        svm->predict(test, scores, ml::StatModel::RAW_OUTPUT);
 
         cout << scores.at<float>(0,0) << " " << scores.at<float>(1,0) << endl;
 
@@ -218,101 +165,60 @@ void testSVM(Ptr<ml::SVM> svm, int offset, int testCount)
     }
 
     float catAverage = accumulate( totalCatScores.begin(), totalCatScores.end(), 0.0)/totalCatScores.size();
-    float dogAverage = accumulate( totalDogScores.begin(), totalDogScores.end(), 0.0)/totalDogScores.size();         
+    float dogAverage = accumulate( totalDogScores.begin(), totalDogScores.end(), 0.0)/totalDogScores.size();
+
     cout << "The catAverage is " << catAverage << " The dogAverage is " << dogAverage << endl;  
+
+    int catCount = 0;
+    for(int i = 0; i < totalCatScores.size(); ++i)
+    {
+        if(totalCatScores[i] > 0.0f)
+        {
+            catCount++;
+        }
+    }
+
+    int dogCount = 0;
+    for(int i = 0; i < totalDogScores.size(); ++i)
+    {
+        if(totalDogScores[i] <= 0.0f)
+        {
+            dogCount++;
+        }
+    }
+
+    cout << "The cat score is " << catCount << " out of " << totalCatScores.size() << " " << ((float)catCount)/totalCatScores.size() << endl; 
+    cout << "The dog score is " << dogCount << " out of " << totalDogScores.size() << " " << ((float)dogCount)/totalDogScores.size() << endl; 
 }
 
 int main()
 {
     std::cout << "Hello World!" << "\n";
 
-    const int sampleSize = 5;
-    const float confidenceStep = 0.05f;
-    const int maxIterations = 5;
-    const int testSize = 5;
+    const int sampleSize = 2000;
+    const int maxIterations = 500;
+    const int testSize = 100;
 
-    vector<Rect> catRects;
-    Mat catTransformedRects(0, targetSize.area(), CV_32FC1);
+    Ptr<DescriptorMatcher> matcher = FlannBasedMatcher::create();
+    Ptr<DescriptorExtractor> extractor = SiftDescriptorExtractor::create();
+    BOWImgDescriptorExtractor bowDE(extractor, matcher);
+    Ptr<FeatureDetector> detector = SiftFeatureDetector::create();
 
-    initialDataExtraction("../PetImages/Cat/%d.jpg", sampleSize, catRects, catTransformedRects);
+    vector<string> paths = {"../PetImages/Cat/%d.jpg", "../PetImages/Dog/%d.jpg"};
+    vector<Mat> images = getImages(paths, sampleSize);
 
-    vector<Rect> dogRects;
-    Mat dogTransformedRects(0, targetSize.area(), CV_32FC1);
+    Mat labels;
+    Mat train_data = initialDataExtraction(images, labels, sampleSize, bowDE, detector);
 
-    initialDataExtraction("../PetImages/Dog/%d.jpg", sampleSize, dogRects, dogTransformedRects);
+    int totalSize = train_data.rows;
+ 
+    Ptr<ml::SVM> svm = ml::SVM::create();
+    svm->setType(ml::SVM::C_SVC);
+    svm->setKernel(ml::SVM::LINEAR);
+    svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, maxIterations, 1e-6));
+    svm->trainAuto(train_data, ml::ROW_SAMPLE, labels);
 
-    //temp mid scores calculated, images flattened, nms selection done
-
-    vector<int> catIndices(catRects.size());
-    vector<int> dogIndices(dogRects.size());
-
-    //assign initial value to be same as index, with dog indices offset by size of cat array
-    for(int i = 0; i < catRects.size(); ++i){ catIndices[i] = i;}
-    for(int i = 0; i < dogRects.size(); ++i){ dogIndices[i] = i + catRects.size();}
-
-    for(int count = 0; count < maxIterations; ++count)
-    {
-        int totalCount = catIndices.size() + dogIndices.size();
-
-        vector<int> order;
-        order.reserve(totalCount);
-        order.insert(order.end(), catIndices.begin(), catIndices.end());
-        order.insert(order.end(), dogIndices.begin(), dogIndices.end());
-
-        unsigned int seed = 0;
-        std::shuffle (order.begin(), order.end(), std::default_random_engine(seed));
-
-        vector<int> labels;
-        labels.reserve(totalCount);
-
-        Mat training_mat(totalCount, targetSize.area(), CV_32FC1);
-
-        for(int i = 0; i < totalCount; ++i)
-        {
-            int j = order[i];
-
-            if(j >= catRects.size())
-            {
-                //remove offset for dog
-                j -= catRects.size();
-                dogTransformedRects.row(j).copyTo(training_mat.row(i));
-                labels.emplace_back(-1);
-            }
-            else
-            {
-                catTransformedRects.row(j).copyTo(training_mat.row(i));
-                labels.emplace_back(1);
-            }
-        }
-
-        Ptr<ml::SVM> svm = ml::SVM::create();
-        svm->setType(ml::SVM::C_SVC);
-        svm->setKernel(ml::SVM::LINEAR);
-        svm->setTermCriteria(TermCriteria(TermCriteria::MAX_ITER, 100, 1e-6));
-        svm->train(training_mat, ml::ROW_SAMPLE, labels);
-
-        testSVM(svm, sampleSize, testSize);
-
-        //early out
-        if(count == maxIterations - 1)
-        {
-            break;
-        }
-
-        Mat catScore;
-        svm->predict(catTransformedRects, catScore, ml::StatModel::RAW_OUTPUT);
-
-        Mat dogScore;
-        svm->predict(dogTransformedRects, dogScore, ml::StatModel::RAW_OUTPUT);
-
-        svm->clear();
-
-        catIndices.clear();
-        catIndices = getNMSSelection(catRects, catScore, 0.5f + (count * confidenceStep), 0.4f);
-
-        dogIndices.clear();
-        dogIndices = getNMSSelection(dogRects, dogScore, 0.5f + (count * confidenceStep), 0.4f);
-    }
+    testSVM(svm, sampleSize + testSize, testSize, bowDE, detector);
 
     waitKey(0);
 
