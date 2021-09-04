@@ -14,7 +14,6 @@ public:
     void setVocab(int maxIterations);
     Mat getDescriptors(const vector<Mat>& images);
     
-
 private:
 
     Mat computeDescriptorsAsync(const vector<Mat>& images, int startPos, int endPos);

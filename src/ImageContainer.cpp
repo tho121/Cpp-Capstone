@@ -4,9 +4,9 @@
 #include <mutex>
 
 ImageContainer::ImageContainer(const vector<string>& loadPaths, int sampleSize, Size imSize, int offset)
+:   categorySize_(sampleSize)
+,   imSize_(imSize)
 {
-    categorySize_ = sampleSize;
-    imSize_ = imSize;
     loadImages(loadPaths, offset);
 }
 
@@ -14,6 +14,7 @@ vector<Mat> ImageContainer::getImages()
 {
     std::lock_guard<std::mutex> lck(mutex_);
 
+    //reserve enough space, assume equal number of images per category
     vector<Mat> allImages;
     allImages.reserve(categorySize_ * images_.size());
 
@@ -32,7 +33,7 @@ void ImageContainer::loadImages(const vector<string>& paths, int offset)
     char path[128];
     for(int i = 0; i < paths.size(); ++i)
     {
-        futures.push_back(async(launch::async, &ImageContainer::loadImagesAsync, this, paths[i], offset));
+        futures.emplace_back(async(launch::async, &ImageContainer::loadImagesAsync, this, paths[i], offset));
     }
 
     for(int i = 0; i < futures.size(); ++i)

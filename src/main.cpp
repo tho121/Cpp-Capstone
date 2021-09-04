@@ -10,38 +10,40 @@
 
 using namespace std;
 
-int main()
+int main(int argc, char *argv[])
 {
-    std::cout << "Hello World!" << "\n";
+    cout << "Cat and Dog Classifier using OpenCV and BoF Sift with SVM!" << endl;
 
-    const int sampleSize = 200;
-    const Size imageSize(300, 300);
+    const int sampleSize = atoi(argv[1]);// 5000;
+    const int testSize = atoi(argv[2]);// 500;
+    const int threadCount = atoi(argv[3]); //4;
+
+    const Size imageSize(0, 0);
     const int dictionarySize = 100;
-    const int threadCount = 4;
     const int maxBagIterations = 1000;
     const int maxSVMIterations = 10000;
-    const int testSize = 500;
+    
 
     vector<string> paths = {"../PetImages/Cat/%d.jpg", "../PetImages/Dog/%d.jpg"};
 
+    //load images
     ImageContainer train_ic(paths, sampleSize, imageSize);
 
+    //set up Bag-of-Features with SIFT trainer
     BagTrainer bagTrainer(dictionarySize, threadCount);
 
-    {
+    {   //compute features
         ScopeTimer<chrono::milliseconds> t("Computed descriptors: ");
-
         bagTrainer.computeDescriptors(train_ic.getImages());
     }
     
-    {
+    {   //set vocab and train
         ScopeTimer<chrono::milliseconds> t("Computed vocab: ");
         bagTrainer.setVocab(maxBagIterations);
     }
 
-    Mat labels;
-    Mat trainData;
-    {
+    Mat trainData, labels;
+    {   //extract features and assign labels
         ScopeTimerMin t("Prepared training data: ");
         vector<Mat> catImages = train_ic.getImages(0);
         Mat catData = bagTrainer.getDescriptors(catImages);
@@ -55,31 +57,16 @@ int main()
         vconcat(catData, dogData, trainData);
     }
     
+    //create SVM
     SVMTrainer svmTrainer(maxSVMIterations);
 
-    {
+    {   //train SVM
         ScopeTimerMin t("Training SVM Done: ");
         svmTrainer.train(trainData, labels);
     }
     
+    //get test images
     ImageContainer test_ic(paths, testSize, imageSize, sampleSize);
-
-    //////////////////////
-
-    /* Mat cat_testData = bagTrainer.getDescriptors(test_ic.getImages(0));
-    Mat dog_testData = bagTrainer.getDescriptors(test_ic.getImages(1));
-
-    cout << "Testing Cat labels" << endl;
-
-    Mat catLabels(cat_testData.rows, 1, CV_32F, 1);
-    svmTrainer.test(cat_testData, catLabels);
-
-    cout << "Testing Dog labels" << endl;
-
-    Mat dogLabels(dog_testData.rows, 1, CV_32F, -1);
-    svmTrainer.test(dog_testData, dogLabels); */
-
-    //////////////////////
 
     std::condition_variable condition;
     std::mutex mutex;
@@ -87,9 +74,9 @@ int main()
     Mat testMat;
     int testIndex;
     
-
-    auto testData = [&testMat, &svmTrainer, &testIndex, &condition, &mutex]() mutable {
-        
+    //setup testing which waits for available data
+    auto testData = [&testMat, &svmTrainer, &testIndex, &condition, &mutex]() mutable 
+    {
         int testCount = 0;
 
         do{
@@ -107,7 +94,9 @@ int main()
         } while (testCount < 2);
     };
 
-    auto getTestData = [&testMat, &bagTrainer, &test_ic, &testIndex, &condition, &mutex] (int index) mutable {
+    //setup test data processing, notifies test cycle when data is ready
+    auto getTestData = [&testMat, &bagTrainer, &test_ic, &testIndex, &condition, &mutex] (int index) mutable 
+    {
         Mat testData = bagTrainer.getDescriptors(test_ic.getImages(index));
 
         std::unique_lock<std::mutex> lck(mutex);
