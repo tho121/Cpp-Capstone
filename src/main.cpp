@@ -38,13 +38,13 @@ int main(int argc, char *argv[])
     }
     
     {   //set vocab and train
-        ScopeTimer<chrono::milliseconds> t("Computed vocab: ");
+        ScopeTimerMin t("Computed vocab: ");
         bagTrainer.setVocab(maxBagIterations);
     }
 
     Mat trainData, labels;
     {   //extract features and assign labels
-        ScopeTimerMin t("Prepared training data: ");
+        ScopeTimerSec t("Prepared training data: ");
         vector<Mat> catImages = train_ic.getImages(0);
         Mat catData = bagTrainer.getDescriptors(catImages);
 
@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
     SVMTrainer svmTrainer(maxSVMIterations);
 
     {   //train SVM
-        ScopeTimerMin t("Training SVM Done: ");
+        ScopeTimerSec t("Training SVM Done: ");
         svmTrainer.train(trainData, labels);
     }
     

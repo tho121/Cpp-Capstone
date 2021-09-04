@@ -11,15 +11,17 @@ public:
     
     ScopeTimer(const char* msg)
     :   startPoint_(chrono::high_resolution_clock::now())
+    ,   finalMsgPrinted_(false)
     {
         msg_ = new char[256];
         memset(msg_, '\0', 256);
         strcpy(msg_, msg);
     }
 
-    ~ScopeTimer()
+    virtual ~ScopeTimer()
     {
-        printMsg();
+        if(!finalMsgPrinted_)
+            printMsg();
 
         delete [] msg_;
     }
@@ -69,6 +71,7 @@ public:
 protected:
     char* msg_;
     chrono::time_point<std::chrono::high_resolution_clock> startPoint_;
+    bool finalMsgPrinted_;
 };
 
 class ScopeTimerSec : public ScopeTimer<chrono::seconds>
@@ -78,7 +81,14 @@ public:
     :   ScopeTimer<chrono::seconds>(msg)
     {}
 
-    void printMsg()
+    virtual ~ScopeTimerSec()
+    {
+        printMsg();
+
+        finalMsgPrinted_ = true;
+    }
+
+    virtual void printMsg()
     {
         cout << "Timer - " << msg_ << " " << getCurrentDuration() << "s" << endl;
     }
@@ -91,7 +101,14 @@ public:
     :   ScopeTimer<chrono::minutes>(msg)
     {}
 
-    void printMsg()
+    virtual ~ScopeTimerMin()
+    {
+        printMsg();
+
+        finalMsgPrinted_ = true;
+    }
+
+    virtual void printMsg()
     {
         cout << "Timer - " << msg_ << " " << getCurrentDuration() << "m" << endl;
     }
