@@ -10,8 +10,8 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/CatDogClassifier",
             "args": [
-                "1000",
-                "100",
+                "2000",
+                "200",
                 "4"
             ],
             "stopAtEntry": false,
@@ -34,8 +34,8 @@
             "request": "launch",
             "program": "${workspaceFolder}/build/CatDogClassifier",
             "args": [
-                "1000",
-                "100",
+                "2000",
+                "200",
                 "4"
             ],
             "stopAtEntry": false,

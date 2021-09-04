@@ -14,11 +14,11 @@ int main(int argc, char *argv[])
 {
     cout << "Cat and Dog Classifier using OpenCV and BoF Sift with SVM!" << endl;
 
-    const int sampleSize = atoi(argv[1]);// 5000;
-    const int testSize = atoi(argv[2]);// 500;
+    const int sampleSize = atoi(argv[1]);// 2000;
+    const int testSize = atoi(argv[2]);// 200;
     const int threadCount = atoi(argv[3]); //4;
 
-    const Size imageSize(0, 0);
+    const Size imageSize(300, 300);
     const int dictionarySize = 100;
     const int maxBagIterations = 1000;
     const int maxSVMIterations = 10000;
